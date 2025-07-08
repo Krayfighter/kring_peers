@@ -70,10 +70,6 @@ int main(int argc, char **argv) {
     errno = 0;
     char *end_pointer;
     unsigned long port_number = strtoul(port_string, &end_pointer, 10);
-    // if (end_pointer != argv[1] + strlen(argv[1])) {
-    //   fprintf(stderr, "FATAL: unexpected characters at the end of port number -> %s", strerror(errno));
-    //   return EXIT_FAILURE;
-    // }
     if (port_number > 0xffff) {
       fprintf(stderr, "FATAL: destination port exceeds 16 bits in size");
       return EXIT_FAILURE;
@@ -93,17 +89,11 @@ int main(int argc, char **argv) {
 
     const char *message = (argc > 2) ? argv[2] : "Test Message";
 
-    // struct sockaddr_in target_addr = {
-    //   .sin_addr = htonl(0x7f000001),
-    //   .sin_port = 12000,
-    //   .sin_family = AF_INET
-    // };
-    // sendto(udp_socket, message, strlen(message), 0x0);
     ssize_t write_size = sendto(
       udp_socket,
       message, strlen(message),
       0x0, (struct sockaddr *)&peer_sockaddr,
-      sizeof(peer_sockaddr)
+      sizeof(struct sockaddr_in)
     );
 
     if (write_size == -1) {
@@ -129,13 +119,13 @@ int main(int argc, char **argv) {
       .sin_addr = INADDR_ANY,
       .sin_family = AF_INET,
     };
-    int bind_result = bind(listener, (struct sockaddr *)&bind_address, sizeof(bind_address));
+    int bind_result = bind(listener, (struct sockaddr *)&bind_address, sizeof(struct sockaddr_in));
     if (bind_result == -1) {
       fprintf(stderr, "FATAL: failed to bind upd socket to 0.0.0.0:13000 -> %s\n", strerror(errno));
       return EXIT_FAILURE;
     }
 
-    socklen_t socket_addr_size = sizeof(bind_address);
+    socklen_t socket_addr_size = sizeof(struct sockaddr_in);
     int result = getsockname(listener, (struct sockaddr *)&bind_address, &socket_addr_size);
     if (result == -1) {
       fprintf(stderr, "FATAL: failed to get socket address info on listener socket -> %s\n", strerror(errno));
@@ -165,27 +155,29 @@ int main(int argc, char **argv) {
       // };
 
       // ssize_t read_size = recvmsg(listener, &msg_ctx, 0x0);
-      struct sockaddr_in client_addr = { 0 };
-      socklen_t addr_len = 0;
-    
+      struct sockaddr_in client_addr = { .sin_family = AF_INET };
+      socklen_t addr_len = sizeof(struct sockaddr_in);
       ssize_t read_size = recvfrom(listener, packet_buffer, 0xffff, 0x0, (struct sockaddr *)&client_addr, &addr_len);
 
       if (read_size == -1) {
-        fprintf(stderr, "FATAL: failed call to recvmsg -> %s\n", strerror(errno));
+        fprintf(stderr, "FATAL: failed call to recvfrom -> %s\n", strerror(errno));
         return EXIT_FAILURE;
       }else if (read_size == 0) {
-        fprintf(stderr, "WARN: recvmsg read 0 bytes");
+        fprintf(stderr, "WARN: recvfrom read 0 bytes");
         continue;
       }
+
+      char *peer_addr_string = inet_ntoa(client_addr.sin_addr);
 
       // fprintf(stdout, "INFO: recieved packet - exiting\n");
       fprintf(
         stdout,
-        "INFO: Recieved packet from peer -> address %u.%u.%u.%u on port %u\naddr_len = %u\n",
-        client_addr.sin_addr.s_addr        & 0x000000ff,
-        (client_addr.sin_addr.s_addr >> 2) & 0x000000ff,
-        (client_addr.sin_addr.s_addr >> 4) & 0x000000ff,
-        (client_addr.sin_addr.s_addr >> 6) & 0x000000ff,
+        "INFO: Recieved packet from peer -> address %s on port %u\naddr_len = %u\n",
+        // client_addr.sin_addr.s_addr        & ~0x000000ff,
+        // (client_addr.sin_addr.s_addr >> 2) & ~0x000000ff,
+        // (client_addr.sin_addr.s_addr >> 4) & ~0x000000ff,
+        // (client_addr.sin_addr.s_addr >> 6) & ~0x000000ff,
+        peer_addr_string,
         client_addr.sin_port,
         addr_len
       );
