@@ -7,10 +7,22 @@
 #include "stdbool.h"
 
 #include "sys/socket.h"
-#include "sys/uio.h"
+// #include "sys/uio.h"
 
+#include "arpa/inet.h"
 #include "netinet/in.h"
-#include "netinet/ip.h"
+// #include "netinet/ip.h"
+// #include <time.h>
+
+
+// find first occurence of `delim` in source
+// returns -1 on error (such as delim not found)
+ssize_t str_find(const char *source, size_t source_len, char delim) {
+  for (size_t i = 0; i < source_len; i += 1) {
+    if (source[i] == delim) { return i; }
+  }
+  return -1;
+}
 
 
 
@@ -26,25 +38,72 @@ int main(int argc, char **argv) {
 
   if (argc > 1) { // run client if any args are passed
 
+    ssize_t colon_index = str_find(argv[1], strlen(argv[1]), ':');
+    if (colon_index == -1) {
+      fprintf(stderr, "FATAL: there is no default port, so the port must be specified\n");
+      return EXIT_FAILURE;
+    }
+    if (colon_index + 1 == strlen(argv[1])) {
+      fprintf(stderr, "FATAL: expected port number after colon\n");
+      return EXIT_FAILURE;
+    }
+
+    argv[1][colon_index] = 0;
+
+    char *addr_string = argv[1];
+    char *port_string = argv[1] + colon_index + 1;
+    fprintf(stdout, "address string -> %s\n", addr_string);
+    fprintf(stdout, "port_string -> %s\n", port_string);
+
+    errno = 0;
+    struct in_addr peer_address;
+    int addr_from_string_result = inet_aton(addr_string, &peer_address);
+    if (addr_from_string_result == 0) {
+      fprintf(
+        stderr,
+        "FATAL: failed to convert peer address argument -> result number=%i | %s",
+        addr_from_string_result, strerror(errno)
+      );
+      return EXIT_FAILURE;
+    }
+
+    errno = 0;
+    char *end_pointer;
+    unsigned long port_number = strtoul(port_string, &end_pointer, 10);
+    // if (end_pointer != argv[1] + strlen(argv[1])) {
+    //   fprintf(stderr, "FATAL: unexpected characters at the end of port number -> %s", strerror(errno));
+    //   return EXIT_FAILURE;
+    // }
+    if (port_number > 0xffff) {
+      fprintf(stderr, "FATAL: destination port exceeds 16 bits in size");
+      return EXIT_FAILURE;
+    }
+
+    struct sockaddr_in peer_sockaddr = {
+      .sin_family = AF_INET,
+      .sin_addr = peer_address,
+      .sin_port = (uint16_t)port_number
+    };
+
     int udp_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udp_socket == -1) {
       fprintf(stderr, "FATAL: failed to create socket -> %s\n", strerror(errno));
       return EXIT_FAILURE;
     }
 
-    const char *message = "Test Message";
+    const char *message = (argc > 2) ? argv[2] : "Test Message";
 
-    struct sockaddr_in target_addr = {
-      .sin_addr = htonl(0x7f000001),
-      .sin_port = 12000,
-      .sin_family = AF_INET
-    };
+    // struct sockaddr_in target_addr = {
+    //   .sin_addr = htonl(0x7f000001),
+    //   .sin_port = 12000,
+    //   .sin_family = AF_INET
+    // };
     // sendto(udp_socket, message, strlen(message), 0x0);
     ssize_t write_size = sendto(
       udp_socket,
       message, strlen(message),
-      0x0, (struct sockaddr *)&target_addr,
-      sizeof(target_addr)
+      0x0, (struct sockaddr *)&peer_sockaddr,
+      sizeof(peer_sockaddr)
     );
 
     if (write_size == -1) {
