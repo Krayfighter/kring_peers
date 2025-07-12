@@ -1,0 +1,7 @@
+
+-Wall
+-Wextra
+-Wpedantic
+-Wno-strict-prototypes
+-Itermcodes
+

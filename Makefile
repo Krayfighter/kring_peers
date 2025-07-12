@@ -1,9 +1,11 @@
 
 
-run: kring_peers
-	./kring_peers
+all: kringp_daemon kringp_frontend
 
-kring_peers: src/*
-	gcc $(wildcard src/*.c) -o kring_peers
+kringp_daemon: src/*
+	gcc src/ipc.c src/daemon.c -o kringp_daemon
+
+kringp_frontend: src/*
+	gcc src/ipc.c src/frontend.c -Itermcodes -o kringp_frontend
 
 
