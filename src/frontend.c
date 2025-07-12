@@ -11,8 +11,6 @@
 #include "sys/socket.h"
 #include "sys/un.h"
 
-#include "termcodes.h"
-
 #include "ipc.h"
 
 
@@ -117,14 +115,11 @@ int main() {
         );
         if (write_size == -1) {
           fprintf(stderr, "Failed to send packet to daemon -> %s\n", strerror(errno));
-          continue;
         }
-        fprintf(stdout, "Sent quit command to daemon - exiting");
+        fprintf(stdout, "exiting\n");
         goto AFTER_MAINLOOP;
       }else if (strncmp("connect ", stdin_buffer, 8) == 0) {
         stdin_buffer[7] = ':';
-        input_read_size -= 1;
-        stdin_buffer[input_read_size] = '\0';
 
         ssize_t write_size = sendto(
           daemon_socket, stdin_buffer, input_read_size, 0x0,
@@ -156,15 +151,13 @@ int main() {
         fprintf(stderr, "FATAL: failed to read from UNIX socket at %s -> %s", daemon_socket_path, strerror(errno));
         return EXIT_FAILURE;
       }
-      // else if (read_size == 0) {
-      //   fprintf(stderr, "WARN: expected socket to be blocking, but read 0 bytes\n");
-      //   usleep(1000);
-      //   continue;
-      // }
+      assert(read_size != 0);
       if (strncmp("errlog:", daemon_read_buffer, 7) == 0) {
         fprintf(stderr, "ERROR: server sent an error\n");
         fwrite(daemon_read_buffer + 7, 1, read_size - 7, stderr);
         fprintf(stderr, "\n");
+      }else if (strncmp("print:", daemon_read_buffer, 6) == 0) {
+        fprintf(stdout, "INFO: received print result from daemon\n%s", daemon_read_buffer + 6);
       }else {
         fprintf(stdout, "WARN: received packet from server with a missing or misformatted message type\n");
         fwrite(daemon_read_buffer, 1, read_size, stdout);

@@ -82,30 +82,27 @@ int attemp_peer_connect_by_string(int udp_socket, char *peer_addr_str, size_t ad
 
   size_t port_len = addr_len - (colon_index + 1);
   if (port_len > 5) {
-    PORT_NUMBER_TOO_LARGE: {};
     errno = EINVAL;
     local_error_string = "Port string exceeds maximum port size";
     return -1;
   }
   size_t port_number = 0;
   size_t power_of_ten = 1;
-  for (size_t i = 1; i < port_len; i += 1) {
+  for (size_t i = 1; i <= port_len; i += 1) {
     char chr = peer_addr_str[addr_len-i];
     if (!isdigit(chr)) {
       errno = EINVAL;
       local_error_string = "Found non-numberic character in port number";
-      fprintf(stderr, "DBG: iteration %lu | non-numberic %c\n", i, chr);
       return -1;
     }
-    port_number += ('0' - chr) * power_of_ten;
+    port_number += (chr - '0') * power_of_ten;
     power_of_ten *= 10;
   }
-  if (port_number > 0xffff) { goto PORT_NUMBER_TOO_LARGE; }
-  fprintf(stderr, "DBG: port number is %u\n", (uint16_t)port_number);
-
-  // #define CONNECTION_MESSAGE_BUFFER_SIZE 256
-  // char connection_message_buffer[CONNECTION_MESSAGE_BUFFER_SIZE];
-  // size_t message_len;
+  if (port_number > 0xffff) {
+    errno = EINVAL;
+    local_error_string = "Port number exceeds 16 bit unsigned int size";
+    return -1;
+  }
 
   const char connection_message[] = "connection-init:";
 
@@ -133,6 +130,7 @@ typedef enum {
   FRONT_CMD_QUIT,
   FRONT_CMD_ECHO,
   FRONT_CMD_CONNECT,
+  FRONT_CMD_PRINT,
 } FrontendCommandType;
 
 typedef struct {
@@ -147,7 +145,7 @@ char frontend_packet_buffer[FRONTEND_PACKET_BUFFER_SIZE];
 
 // returns -1 on error, 0 on success
 int read_frontend_packet(int fd, FILE *logger, FrontendCommand *returned_command) {
-  memset(frontend_packet_buffer, 0, FRONTEND_PACKET_BUFFER_SIZE);
+  // memset(frontend_packet_buffer, 0, FRONTEND_PACKET_BUFFER_SIZE);
   struct sockaddr_un client_addr  = {
     .sun_family = AF_UNIX
   };
@@ -165,8 +163,8 @@ int read_frontend_packet(int fd, FILE *logger, FrontendCommand *returned_command
   returned_command->client_addr = client_addr;
 
   returned_command->cmd_type = FRONT_CMD_INVALID;
-  returned_command->body = NULL;
-  returned_command->body_len = 0;
+  returned_command->body = frontend_packet_buffer;
+  returned_command->body_len = read_size;
   // TODO make memory safety better
 
   assert(strncmp("echo:", "echo:", 5) == 0);
@@ -180,6 +178,10 @@ int read_frontend_packet(int fd, FILE *logger, FrontendCommand *returned_command
     returned_command->cmd_type = FRONT_CMD_CONNECT;
     returned_command->body = frontend_packet_buffer + 8;
     returned_command->body_len = read_size - 8;
+  }else if (strncmp("print:", frontend_packet_buffer, 6)) {
+    returned_command->cmd_type = FRONT_CMD_PRINT;
+    returned_command->body = frontend_packet_buffer + 6;
+    returned_command->body_len = read_size - 6;
   }
 
   return 0;
@@ -210,9 +212,11 @@ int open_udp_server(FILE *logger) {
 // returns -1 on error, 0 on success
 //
 // replaces `buffer_len` with the number of bytes read
-int read_udp_packet(int fd, void *buffer, size_t *buffer_len, FILE *logger) {
-
-  struct sockaddr_in client_addr = { .sin_family = AF_INET };
+// replaces `client_addr` with the address of the client from which the packet was received
+int read_udp_packet(int fd, void *buffer, size_t *buffer_len, struct sockaddr_in *client_addr, FILE *logger) {
+  
+  // struct sockaddr_in client_addr = { .sin_family = AF_INET };
+  *client_addr = (struct sockaddr_in){ .sin_family = AF_INET };
   socklen_t addr_len = sizeof(struct sockaddr_in);
   ssize_t read_size = recvfrom(fd, buffer, *buffer_len, 0x0, (struct sockaddr *)&client_addr, &addr_len);
 
@@ -224,27 +228,18 @@ int read_udp_packet(int fd, void *buffer, size_t *buffer_len, FILE *logger) {
 
   *buffer_len = (size_t)read_size;
   return 0;
+}
 
-  // char *peer_addr_string = inet_ntoa(client_addr.sin_addr);
-
-  // fprintf(stdout, "INFO: recieved packet - exiting\n");
-  // fprintf(
-  //   stdout,
-  //   "INFO: Recieved packet from peer -> address %s on port %u\naddr_len = %u\n",
-  //   // client_addr.sin_addr.s_addr        & ~0x000000ff,
-  //   // (client_addr.sin_addr.s_addr >> 2) & ~0x000000ff,
-  //   // (client_addr.sin_addr.s_addr >> 4) & ~0x000000ff,
-  //   // (client_addr.sin_addr.s_addr >> 6) & ~0x000000ff,
-  //   peer_addr_string,
-  //   client_addr.sin_port,
-  //   addr_len
-  // );
-
-  // fprintf(stdout, "packet info (string) ->");
-  // fwrite(packet_buffer, 0, read_size, stdout);
-  // fprintf(stdout, "\n");
-  // fflush(stdout);
-
+// compares `sockaddr` with each of the members of `peer_array` to identify
+// if it is contained by that array
+bool array_contains_sockaddr(Peer *peer_array, size_t peer_count, struct sockaddr_in *sockaddr) {
+  for (size_t i = 0; i < peer_count; i += 1) {
+    if (
+      peer_array[i].address.s_addr == sockaddr->sin_addr.s_addr
+      && peer_array[i].recv_port == sockaddr->sin_port
+    ) { return true; }
+  }
+  return false;
 }
 
 int main() {
@@ -253,16 +248,10 @@ int main() {
   int listener = open_udp_server(stderr);
   int daemon_listener = open_daemon_listener(stderr);
 
-  // socklen_t socket_addr_size = sizeof(struct sockaddr_in);
-  // int result = getsockname(listener, (struct sockaddr *)&bind_address, &socket_addr_size);
-  // if (result == -1) {
-  //   fprintf(stderr, "FATAL: failed to get socket address info on listener socket -> %s\n", strerror(errno));
-  //   return EXIT_FAILURE;
-  // }
-
   fprintf(stdout, "INFO: servering at 0.0.0.0:12000\n");
 
-  Peer active_peers[32];
+  #define ACTIVE_PEERS_MAX 32
+  Peer active_peers[ACTIVE_PEERS_MAX];
   size_t active_peer_count = 0;
 
   char packet_buffer[0xffff]; // max size of udp packet is the max size of a uint16_t
@@ -312,7 +301,7 @@ int main() {
             fprintf(stdout, "\n");
           }; break;
           case FRONT_CMD_CONNECT: {
-            if (active_peer_count == 32) {
+            if (active_peer_count == ACTIVE_PEERS_MAX) {
               fprintf(stderr, "Failed to connect to peer; The peer limit has been reached\n");
               continue;
             }
@@ -335,19 +324,99 @@ int main() {
               }
             }
           }
+          case FRONT_CMD_PRINT: {
+            // this buffer must be large enough to print one
+            // copy of every active peer
+            //     address    | port
+            // 4  |4  |4  |4  |5
+            // xxx.xxx.xxx.xxx:xxxxx <- 21 characters (bytes)
+            // plus the newline at the end.
+            // Thus the minimum storage required for this
+            // buffer is 22 * ACTIVE_PEERS_MAX + 1 for a null byte
+            //   + strlen("print:")
+            const char message_prefix[] = "print:";
+            const size_t print_cmd_buffer_size = 22 * ACTIVE_PEERS_MAX + 1 + strlen(message_prefix);
+            char *print_cmd_buffer = alloca(print_cmd_buffer_size);
+
+            size_t message_len = 0;
+            size_t remaining_buffer_space = print_cmd_buffer_size;
+            int _result = snprintf(print_cmd_buffer, print_cmd_buffer_size, message_prefix);
+            assert(_result == strlen(message_prefix));
+            message_len += strlen(message_prefix);
+            remaining_buffer_space -= strlen(message_prefix);
+
+            for (size_t i = 0; i < active_peer_count; i += 1) {
+              Peer *peer = &active_peers[i];
+              int write_size = snprintf(
+                print_cmd_buffer + message_len, remaining_buffer_space,
+                "%u.%u.%u.%u:%u\n",
+                (uint8_t)((peer->address.s_addr >> 3 * 8) & 0x000000ff),
+                (uint8_t)((peer->address.s_addr >> 2 * 8) & 0x000000ff),
+                (uint8_t)((peer->address.s_addr >> 1 * 8) & 0x000000ff),
+                (uint8_t)((peer->address.s_addr)          & 0x000000ff),
+                peer->recv_port
+              );
+              assert(write_size > -1); // this should always be true of ISO C
+              // this should always be true unless there is a logic error in this code
+              assert((size_t)write_size <= remaining_buffer_space);
+
+              message_len += write_size;
+              remaining_buffer_space -= write_size;
+            }
+
+            ssize_t write_size = sendto(
+              daemon_listener, print_cmd_buffer, message_len + 1, 0x0,
+              (struct sockaddr *)&client_socket_addr, SUN_LEN(&client_socket_addr)
+            );
+            if (write_size == -1) {
+              fprintf(stderr, "Failed to write result of print: command to frontend socket -> %s\n", strerror(errno));
+            }else {
+              assert((size_t)write_size == message_len + 1);
+            }
+          }; break;
         }
       }
     }else if (file_descriptors[1].revents != 0) {
-      size_t read_bytes = sizeof(packet_buffer);
-      int result = read_udp_packet(listener, packet_buffer, &read_bytes, stderr);
-
-      if (result != -1) {
-        fprintf(stdout, "TEST: recieved packet with contents -> ");
-        fwrite(packet_buffer, 1, read_bytes, stdout);
-        fprintf(stdout, "\n");
-      }else {
-        fprintf(stderr, "Error on udp socket - continuiung\n");
+      size_t read_bytes = sizeof(packet_buffer) - 1;
+      struct sockaddr_in client_address;
+      int result = read_udp_packet(listener, packet_buffer, &read_bytes, &client_address, stderr);
+      if (result == -1) {
+        fprintf(stderr, "Error on udp socket - continuing");
+        continue;
       }
+      packet_buffer[read_bytes] = '\0';
+
+      if (strncmp("connection-init:", packet_buffer, 16) == 0) {
+        if (array_contains_sockaddr(active_peers, active_peer_count, &client_address)) {
+          const char response[] = "connection-ack:already_connected";
+          ssize_t write_size = sendto(
+            listener, response, sizeof(response), 0x0,
+            (struct sockaddr *)&client_address, sizeof(client_address)
+          );
+          if (write_size == -1) {
+            fprintf(stderr, "Failed to response to peer that was already connected -> %s\n", strerror(errno));
+          }
+        }else {
+          active_peers[active_peer_count] = (Peer) {
+            .address = client_address.sin_addr,
+            .recv_port = client_address.sin_port
+          };
+          active_peer_count += 1;
+        }
+      }else if (strncmp("connection-ack:", packet_buffer, 15) == 0) {
+        if (!array_contains_sockaddr(active_peers, active_peer_count, &client_address)) {
+          if (active_peer_count == ACTIVE_PEERS_MAX) {
+            fprintf(stderr, "WARN: received a \"connection-ack:\" message from peer while currently connected to the maximum number of peers\n");
+            continue;
+          }
+          active_peers[active_peer_count] = (Peer) {
+            .address = client_address.sin_addr,
+            .recv_port = client_address.sin_port
+          };
+          active_peer_count += 1;
+        }
+      }
+      // TODO implement a method noting that a peer has not responded to a "connection-init:" message
     }
 
   }
