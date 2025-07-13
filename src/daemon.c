@@ -414,7 +414,7 @@ int main() {
 
           const char response[] = "connection-ack:";
           ssize_t write_size = sendto(
-            daemon_listener, response, sizeof(response), 0x0,
+            listener, response, sizeof(response), 0x0,
             (struct sockaddr *)&client_address, sizeof(client_address)
           );
           if (write_size == -1) {
