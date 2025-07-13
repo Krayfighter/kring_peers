@@ -160,6 +160,7 @@ int read_frontend_packet(int fd, FILE *logger, FrontendCommand *returned_command
     if (logger != NULL) { fprintf(logger, "Failed to read packet from socket -> %s", strerror(errno)); }
     return -1;
   }
+  frontend_packet_buffer[read_size] = '\0';
   returned_command->client_addr = client_addr;
 
   returned_command->cmd_type = FRONT_CMD_INVALID;
@@ -178,10 +179,12 @@ int read_frontend_packet(int fd, FILE *logger, FrontendCommand *returned_command
     returned_command->cmd_type = FRONT_CMD_CONNECT;
     returned_command->body = frontend_packet_buffer + 8;
     returned_command->body_len = read_size - 8;
-  }else if (strncmp("print:", frontend_packet_buffer, 6)) {
+  }else if (strncmp("print:", frontend_packet_buffer, 6) == 0) {
     returned_command->cmd_type = FRONT_CMD_PRINT;
     returned_command->body = frontend_packet_buffer + 6;
     returned_command->body_len = read_size - 6;
+  }else {
+    fprintf(stderr, "DBG: unmatch packet command -> %s\n", frontend_packet_buffer);
   }
 
   return 0;
@@ -373,6 +376,10 @@ int main() {
             }else {
               assert((size_t)write_size == message_len + 1);
             }
+            fprintf(stderr,
+              "DBG: peer_count: %lu | wrote bytes %lu | message contents %s\n",
+              active_peer_count, write_size, print_cmd_buffer
+            );
           }; break;
         }
       }
@@ -387,6 +394,7 @@ int main() {
       packet_buffer[read_bytes] = '\0';
 
       if (strncmp("connection-init:", packet_buffer, 16) == 0) {
+        fprintf(stderr, "DBG: received peer connection init packet\n");
         if (array_contains_sockaddr(active_peers, active_peer_count, &client_address)) {
           const char response[] = "connection-ack:already_connected";
           ssize_t write_size = sendto(
@@ -404,6 +412,7 @@ int main() {
           active_peer_count += 1;
         }
       }else if (strncmp("connection-ack:", packet_buffer, 15) == 0) {
+        fprintf(stderr, "DBG: received peer connection acknowledgement packet\n");
         if (!array_contains_sockaddr(active_peers, active_peer_count, &client_address)) {
           if (active_peer_count == ACTIVE_PEERS_MAX) {
             fprintf(stderr, "WARN: received a \"connection-ack:\" message from peer while currently connected to the maximum number of peers\n");

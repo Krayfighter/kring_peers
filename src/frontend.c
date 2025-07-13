@@ -45,16 +45,6 @@ int main() {
     return EXIT_FAILURE;
   }
 
-  // const char *test_message = "quit:TEST from kring_peers frontend";
-  // ssize_t write_size = sendto(
-  //   daemon_socket, test_message, strlen(test_message), 0x0,
-  //   (struct sockaddr *)&daemon_socket_addr, sizeof(daemon_socket_addr)
-  // );
-  // if (write_size == -1) {
-  //   fprintf(stderr, "FATAL: failed to write to unix socket at %s -> %s", daemon_socket_path, strerror(errno));
-  //   return EXIT_FAILURE;
-  // }
-
   #define DAEMON_READ_BUFFER_SIZE 4096
   char daemon_read_buffer[DAEMON_READ_BUFFER_SIZE];
 
@@ -128,6 +118,16 @@ int main() {
         assert(write_size == input_read_size);
 
         fprintf(stdout, "Sent connection command to server\n");
+      }else if (strcmp("print", stdin_buffer) == 0) {
+        ssize_t write_size = sendto(
+          daemon_socket, "print:", 6, 0x0,
+          (struct sockaddr *)&daemon_socket_addr, sizeof(daemon_socket_addr)
+        );
+        if (write_size == -1) {
+          fprintf(stderr, "Failed to send packet to daemon -> %s\n", strerror(errno));
+          continue;
+        }
+        assert(write_size == 6);
       }
       else {
         fprintf(stdout,
@@ -157,7 +157,9 @@ int main() {
         fwrite(daemon_read_buffer + 7, 1, read_size - 7, stderr);
         fprintf(stderr, "\n");
       }else if (strncmp("print:", daemon_read_buffer, 6) == 0) {
-        fprintf(stdout, "INFO: received print result from daemon\n%s", daemon_read_buffer + 6);
+        fprintf(stdout, "INFO: received print result from daemon\n");
+        fwrite(daemon_read_buffer + 6, 1, read_size - 6, stdout);
+        fprintf(stdout, "\n");
       }else {
         fprintf(stdout, "WARN: received packet from server with a missing or misformatted message type\n");
         fwrite(daemon_read_buffer, 1, read_size, stdout);
@@ -170,71 +172,6 @@ int main() {
   }
 
   AFTER_MAINLOOP: {};
-
-  // ssize_t colon_index = str_find(argv[1], strlen(argv[1]), ':');
-  // if (colon_index == -1) {
-  //   fprintf(stderr, "FATAL: there is no default port, so the port must be specified\n");
-  //   return EXIT_FAILURE;
-  // }
-  // if (colon_index + 1 == strlen(argv[1])) {
-  //   fprintf(stderr, "FATAL: expected port number after colon\n");
-  //   return EXIT_FAILURE;
-  // }
-
-  // argv[1][colon_index] = 0;
-
-  // char *addr_string = argv[1];
-  // char *port_string = argv[1] + colon_index + 1;
-  // fprintf(stdout, "address string -> %s\n", addr_string);
-  // fprintf(stdout, "port_string -> %s\n", port_string);
-
-  // errno = 0;
-  // struct in_addr peer_address;
-  // int addr_from_string_result = inet_aton(addr_string, &peer_address);
-  // if (addr_from_string_result == 0) {
-  //   fprintf(
-  //     stderr,
-  //     "FATAL: failed to convert peer address argument -> result number=%i | %s",
-  //     addr_from_string_result, strerror(errno)
-  //   );
-  //   return EXIT_FAILURE;
-  // }
-
-  // errno = 0;
-  // char *end_pointer;
-  // unsigned long port_number = strtoul(port_string, &end_pointer, 10);
-  // if (port_number > 0xffff) {
-  //   fprintf(stderr, "FATAL: destination port exceeds 16 bits in size");
-  //   return EXIT_FAILURE;
-  // }
-
-  // struct sockaddr_in peer_sockaddr = {
-  //   .sin_family = AF_INET,
-  //   .sin_addr = peer_address,
-  //   .sin_port = (uint16_t)port_number
-  // };
-
-  // int udp_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  // if (udp_socket == -1) {
-  //   fprintf(stderr, "FATAL: failed to create socket -> %s\n", strerror(errno));
-  //   return EXIT_FAILURE;
-  // }
-
-  // const char *message = (argc > 2) ? argv[2] : "Test Message";
-
-  // ssize_t write_size = sendto(
-  //   udp_socket,
-  //   message, strlen(message),
-  //   0x0, (struct sockaddr *)&peer_sockaddr,
-  //   sizeof(struct sockaddr_in)
-  // );
-
-  // if (write_size == -1) {
-  //   fprintf(stderr, "FATAL: failed to write to UDP socket -> %s\n", strerror(errno));
-  //   return EXIT_FAILURE;
-  // }
-
-  // fprintf(stdout, "INFO: write %lu bytes to UDP socket\n", (size_t)write_size);
 
   close(daemon_socket);
   unlink(client_socket_path);
