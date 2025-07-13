@@ -21,6 +21,14 @@
 
 char *local_error_string = NULL;
 
+#define IPV4_ADDR_FMT "%u.%u.%u.%u:%u"
+#define IPV4_ADDR_FMT_ARGS(addr, port) \
+(uint8_t)((addr >> 3 * 8) & 0x000000ff), \
+(uint8_t)((addr >> 2 * 8) & 0x000000ff), \
+(uint8_t)((addr >> 1 * 8) & 0x000000ff), \
+(uint8_t)((addr)          & 0x000000ff), \
+port
+
 typedef struct{
   struct in_addr address;
   uint16_t recv_port;
@@ -185,7 +193,7 @@ int read_frontend_packet(int fd, FILE *logger, FrontendCommand *returned_command
     returned_command->body = frontend_packet_buffer + 6;
     returned_command->body_len = read_size - 6;
   }else {
-    fprintf(stderr, "DBG: unmatch packet command -> %s\n", frontend_packet_buffer);
+    fprintf(stderr, "WARN: unmatch packet command -> %s\n", frontend_packet_buffer);
   }
 
   return 0;
@@ -221,13 +229,19 @@ int read_udp_packet(int fd, void *buffer, size_t *buffer_len, struct sockaddr_in
   
   // struct sockaddr_in client_addr = { .sin_family = AF_INET };
   *client_addr = (struct sockaddr_in){ .sin_family = AF_INET };
-  socklen_t addr_len = sizeof(struct sockaddr_in);
-  ssize_t read_size = recvfrom(fd, buffer, *buffer_len, 0x0, (struct sockaddr *)&client_addr, &addr_len);
+  socklen_t addr_len = sizeof(*client_addr);
+  ssize_t read_size = recvfrom(fd, buffer, *buffer_len, 0x0, (struct sockaddr *)client_addr, &addr_len);
 
   if (read_size == -1) {
     // fprintf(stderr, "FATAL: failed call to recvfrom -> %s\n", strerror(errno));
     if (logger != NULL) { fprintf(logger, "Failed call to recvfrom -> %s\n", strerror(errno)); }
     return -1;
+  }
+
+  ssize_t write_size = sendto(fd, "test", 4, 0x0, (struct sockaddr *)client_addr, addr_len) != -1;
+  // assert(write_size == -1);
+  if (write_size == -1) {
+    fprintf(stderr, "Failed to send packet back to client -> %s\n", strerror(errno));
   }
 
   *buffer_len = (size_t)read_size;
@@ -265,7 +279,8 @@ int main() {
     (struct pollfd) { .fd = daemon_listener, .events = POLLIN },
     (struct pollfd) { .fd = listener, .events = POLLIN },
   };
-  const size_t file_descriptor_count = sizeof(file_descriptors) / sizeof(struct pollfd);
+  // const size_t file_descriptor_count = sizeof(file_descriptors) / sizeof(struct pollfd);
+  const size_t file_descriptor_count = 2;
   
   while (true) {
     for (size_t i = 0; i < file_descriptor_count; i += 1) {
@@ -296,7 +311,7 @@ int main() {
             }
           }; break;
           case FRONT_CMD_QUIT: {
-            fprintf(stdout, "INFO: received QUIT command from frontend - exiting");
+            fprintf(stdout, "INFO: received QUIT command from frontend - exiting\n");
             goto AFTER_MAINLOOP;
           }; break;
           case FRONT_CMD_INVALID: {
@@ -321,7 +336,7 @@ int main() {
               const char frontend_error_message[] = "errlog:Failed to send connection request to peer";
               ssize_t write_size = sendto(
                 daemon_listener, frontend_error_message, sizeof(frontend_error_message), 0x0,
-                (struct sockaddr *)&client_socket_addr, sizeof(client_socket_addr)
+                (struct sockaddr *)&frontend_socket_addr, sizeof(frontend_socket_addr)
               );
               if (write_size == -1) {
                 fprintf(stderr, "Failed to send error packket to client -> %s\n", strerror(errno));
@@ -353,12 +368,14 @@ int main() {
               Peer *peer = &active_peers[i];
               int write_size = snprintf(
                 print_cmd_buffer + message_len, remaining_buffer_space,
-                "%u.%u.%u.%u:%u\n",
-                (uint8_t)((peer->address.s_addr >> 3 * 8) & 0x000000ff),
-                (uint8_t)((peer->address.s_addr >> 2 * 8) & 0x000000ff),
-                (uint8_t)((peer->address.s_addr >> 1 * 8) & 0x000000ff),
-                (uint8_t)((peer->address.s_addr)          & 0x000000ff),
-                peer->recv_port
+                IPV4_ADDR_FMT "\n",
+                IPV4_ADDR_FMT_ARGS(peer->address.s_addr, peer->recv_port)
+                // "%u.%u.%u.%u:%u\n",
+                // (uint8_t)((peer->address.s_addr >> 3 * 8) & 0x000000ff),
+                // (uint8_t)((peer->address.s_addr >> 2 * 8) & 0x000000ff),
+                // (uint8_t)((peer->address.s_addr >> 1 * 8) & 0x000000ff),
+                // (uint8_t)((peer->address.s_addr)          & 0x000000ff),
+                // peer->recv_port
               );
               assert(write_size > -1); // this should always be true of ISO C
               // this should always be true unless there is a logic error in this code
@@ -370,17 +387,13 @@ int main() {
 
             ssize_t write_size = sendto(
               daemon_listener, print_cmd_buffer, message_len + 1, 0x0,
-              (struct sockaddr *)&client_socket_addr, SUN_LEN(&client_socket_addr)
+              (struct sockaddr *)&frontend_socket_addr, SUN_LEN(&frontend_socket_addr)
             );
             if (write_size == -1) {
               fprintf(stderr, "Failed to write result of print: command to frontend socket -> %s\n", strerror(errno));
             }else {
               assert((size_t)write_size == message_len + 1);
             }
-            fprintf(stderr,
-              "DBG: peer_count: %lu | wrote bytes %lu | message contents %s\n",
-              active_peer_count, write_size, print_cmd_buffer
-            );
           }; break;
         }
       }
@@ -395,7 +408,7 @@ int main() {
       packet_buffer[read_bytes] = '\0';
 
       if (strncmp("connection-init:", packet_buffer, 16) == 0) {
-        fprintf(stderr, "DBG: received peer connection init packet\n");
+        fprintf(stdout, "INFO: received peer connection init packet\n");
         if (array_contains_sockaddr(active_peers, active_peer_count, &client_address)) {
           const char response[] = "connection-ack:already_connected";
           ssize_t write_size = sendto(
@@ -403,7 +416,7 @@ int main() {
             (struct sockaddr *)&client_address, sizeof(client_address)
           );
           if (write_size == -1) {
-            fprintf(stderr, "Failed to response to peer that was already connected -> %s\n", strerror(errno));
+            fprintf(stderr, "Failed to respond to peer that was already connected -> %s\n", strerror(errno));
           }
         }else {
           active_peers[active_peer_count] = (Peer) {
@@ -413,6 +426,10 @@ int main() {
           active_peer_count += 1;
 
           const char response[] = "connection-ack:";
+          // ssize_t write_size = sendto(
+          //   listener, response, sizeof(response), 0x0,
+          //   (struct sockaddr *)&client_address, sizeof(struct sockaddr_in)
+          // );
           ssize_t write_size = sendto(
             listener, response, sizeof(response), 0x0,
             (struct sockaddr *)&client_address, sizeof(client_address)
@@ -424,7 +441,7 @@ int main() {
           }
         }
       }else if (strncmp("connection-ack:", packet_buffer, 15) == 0) {
-        fprintf(stderr, "DBG: received peer connection acknowledgement packet\n");
+        fprintf(stderr, "INFO: received peer connection acknowledgement packet\n");
         if (!array_contains_sockaddr(active_peers, active_peer_count, &client_address)) {
           if (active_peer_count == ACTIVE_PEERS_MAX) {
             fprintf(stderr, "WARN: received a \"connection-ack:\" message from peer while currently connected to the maximum number of peers\n");
@@ -437,7 +454,7 @@ int main() {
           active_peer_count += 1;
         }
       }else {
-        fprintf(stderr, "DBG: unhandled/invalid packet header from peer -> %s\n", packet_buffer);
+        fprintf(stderr, "WARN: unhandled/invalid packet header from peer -> %s\n", packet_buffer);
       }
       // TODO implement a method noting that a peer has not responded to a "connection-init:" message
     }

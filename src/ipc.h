@@ -5,8 +5,8 @@
 extern const char *daemon_socket_path;
 extern struct sockaddr_un daemon_socket_addr;
 
-extern const char *client_socket_path;
-extern struct sockaddr_un client_socket_addr;
+extern const char *frontend_socket_path;
+extern struct sockaddr_un frontend_socket_addr;
 
 void init_ipc();
 // returns (sockaddr_un){ 0 } on error

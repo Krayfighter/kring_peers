@@ -27,7 +27,7 @@ ssize_t str_find(const char *source, size_t source_len, char delim) {
 int main() {
 
   init_ipc();
-  unlink(client_socket_path);
+  unlink(frontend_socket_path);
 
   int daemon_socket = socket(PF_UNIX, SOCK_DGRAM, 0);
   if (daemon_socket == -1) {
@@ -35,7 +35,7 @@ int main() {
     return EXIT_FAILURE;
   }
 
-  int daemon_connection_bind_result = bind(daemon_socket, (struct sockaddr *)&client_socket_addr, SUN_LEN(&client_socket_addr));
+  int daemon_connection_bind_result = bind(daemon_socket, (struct sockaddr *)&frontend_socket_addr, SUN_LEN(&frontend_socket_addr));
   if (daemon_connection_bind_result == -1) {
     fprintf(
       stderr,
@@ -174,7 +174,7 @@ int main() {
   AFTER_MAINLOOP: {};
 
   close(daemon_socket);
-  unlink(client_socket_path);
+  unlink(frontend_socket_path);
 
   return 0;
 }
