@@ -23,10 +23,10 @@ char *local_error_string = NULL;
 
 #define IPV4_ADDR_FMT "%u.%u.%u.%u:%u"
 #define IPV4_ADDR_FMT_ARGS(addr, port) \
-(uint8_t)((addr >> 3 * 8) & 0x000000ff), \
-(uint8_t)((addr >> 2 * 8) & 0x000000ff), \
-(uint8_t)((addr >> 1 * 8) & 0x000000ff), \
 (uint8_t)((addr)          & 0x000000ff), \
+(uint8_t)((addr >> 1 * 8) & 0x000000ff), \
+(uint8_t)((addr >> 2 * 8) & 0x000000ff), \
+(uint8_t)((addr >> 3 * 8) & 0x000000ff), \
 port
 
 typedef struct{
@@ -236,12 +236,6 @@ int read_udp_packet(int fd, void *buffer, size_t *buffer_len, struct sockaddr_in
     // fprintf(stderr, "FATAL: failed call to recvfrom -> %s\n", strerror(errno));
     if (logger != NULL) { fprintf(logger, "Failed call to recvfrom -> %s\n", strerror(errno)); }
     return -1;
-  }
-
-  ssize_t write_size = sendto(fd, "test", 4, 0x0, (struct sockaddr *)client_addr, addr_len) != -1;
-  // assert(write_size == -1);
-  if (write_size == -1) {
-    fprintf(stderr, "Failed to send packet back to client -> %s\n", strerror(errno));
   }
 
   *buffer_len = (size_t)read_size;
