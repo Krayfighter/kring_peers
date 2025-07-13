@@ -326,7 +326,7 @@ int main() {
                 fprintf(stderr, "Failed to send error packket to client -> %s\n", strerror(errno));
               }
             }
-          }
+          }; break;
           case FRONT_CMD_PRINT: {
             // this buffer must be large enough to print one
             // copy of every active peer
@@ -424,6 +424,8 @@ int main() {
           };
           active_peer_count += 1;
         }
+      }else {
+        fprintf(stderr, "DBG: unhandled/invalid packet header from peer -> %s\n", packet_buffer);
       }
       // TODO implement a method noting that a peer has not responded to a "connection-init:" message
     }
