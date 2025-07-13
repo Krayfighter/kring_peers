@@ -17,6 +17,7 @@
 #include "netinet/in.h"
 
 #include "ipc.h"
+#include <stdint.h>
 
 char *local_error_string = NULL;
 
@@ -410,6 +411,17 @@ int main() {
             .recv_port = client_address.sin_port
           };
           active_peer_count += 1;
+
+          const char response[] = "connection-ack:";
+          ssize_t write_size = sendto(
+            daemon_listener, response, sizeof(response), 0x0,
+            (struct sockaddr *)&client_address, sizeof(client_address)
+          );
+          if (write_size == -1) {
+            fprintf(stderr, "Failed to send connection acknowledgement packet to peer -> %s\n", strerror(errno));
+          }else {
+            assert(write_size == sizeof(response));
+          }
         }
       }else if (strncmp("connection-ack:", packet_buffer, 15) == 0) {
         fprintf(stderr, "DBG: received peer connection acknowledgement packet\n");
