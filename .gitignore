@@ -1,4 +1,4 @@
-./kringp_daemon
-./kringp_frontend
+kringp_daemon
+kringp_frontend
 
-src/
+termcodes/
